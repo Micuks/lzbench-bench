@@ -448,7 +448,20 @@ def cmd_run(args: argparse.Namespace) -> int:
 
     blocks = [int(b) for b in args.blocks.split(",")]
     algo_names = [a.strip() for a in args.algos.split(",")] if args.algos else None
-    matrix = algorithms.expand_matrix(algo_names, n_points=args.level_points)
+
+    if args.preset:
+        # 直接复用 lzbench 内置 alias（如 ALL / FAST）。优点：跟着 lzbench 二进制走，
+        # 算法/level 集合永远同步。--algos 仍可作为后置过滤器。
+        l_out = subprocess.run(
+            [str(lzbench), "-l"], capture_output=True, text=True, check=True
+        ).stdout
+        matrix = algorithms.parse_lzbench_alias(l_out, args.preset)
+        if algo_names:
+            allow = set(algo_names)
+            matrix = [(a, l) for (a, l) in matrix if a in allow]
+        print(f"preset={args.preset}: {len(matrix)} (algo, level) 对（来自 lzbench -l）", flush=True)
+    else:
+        matrix = algorithms.expand_matrix(algo_names, n_points=args.level_points)
 
     # 自检过滤未编译进的算法
     detected_path = out_dir / "algorithms.detected.json"
@@ -643,7 +656,12 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--workers", type=int, default=None)
     pr.add_argument("--blocks", default=",".join(str(b) for b in DEFAULT_BLOCKS))
     pr.add_argument("--algos", default=None)
-    pr.add_argument("--level-points", type=int, default=DEFAULT_LEVEL_POINTS)
+    pr.add_argument("--level-points", type=int, default=DEFAULT_LEVEL_POINTS,
+                    help="多 level 算法的采样点数（与 --preset 互斥）")
+    pr.add_argument("--preset", default=None,
+                    help="使用 lzbench 内置 alias（ALL / FAST），等价于上游 -e<ALIAS>。"
+                         " ALL = lzbench20_sorted.md 那张表的 candidates 集合。"
+                         " 指定后忽略 --level-points，--algos 仍作过滤器。")
     pr.add_argument("--time", type=_parse_time,
                     default=DEFAULT_TIME, help="格式 ctime,dtime（秒）")
     pr.add_argument("--task-timeout", type=int, default=DEFAULT_TIMEOUT)

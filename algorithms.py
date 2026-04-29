@@ -122,3 +122,56 @@ def expand_matrix(
         for lvl in sample_levels(spec, n_points):
             out.append((spec.name, lvl))
     return out
+
+
+def parse_lzbench_alias(
+    lzbench_l_output: str,
+    alias: str = "ALL",
+) -> list[tuple[str, int | None]]:
+    """解析 `lzbench -l` 输出里的 alias 行，返回 (algo, level) 列表。
+
+    `lzbench -l` 末尾会列出 alias，如：
+        ALL  = memcpy/density,1,2,3/brieflz,1,3,6,8/.../zstd,1,2,5,8,11,15,18,22
+        FAST = memcpy/density,1,2,3/.../zstd,1,2,3,4,5
+
+    每个 entry 用 '/' 分隔，第一个 token 是 algo 名（含 lzbench 已展开的子 alias，
+    例如 bsc1 / bsc4），后面用 ',' 分隔的是 level。无 level 的 entry 表示该算法
+    无 level 参数（如 lz4、snappy）。
+
+    调用方负责执行 `lzbench -l` 取 stdout；这里只做纯解析，便于单测。
+    """
+    target_line: str | None = None
+    for raw in lzbench_l_output.splitlines():
+        s = raw.strip()
+        # 形如 "ALL: <注释>" 或 "ALL = <spec>"，我们要的是后者
+        if "=" not in s:
+            continue
+        head, rhs = s.split("=", 1)
+        if head.strip() == alias:
+            target_line = rhs.strip()
+            break
+    if target_line is None:
+        raise ValueError(
+            f"未在 lzbench -l 输出中找到 alias '{alias}'。"
+            f"已知 alias 通常是 ALL / FAST，请用 `lzbench -l | tail` 确认。"
+        )
+
+    pairs: list[tuple[str, int | None]] = []
+    for entry in target_line.split("/"):
+        entry = entry.strip()
+        if not entry:
+            continue
+        parts = entry.split(",")
+        algo = parts[0].strip()
+        levels = parts[1:]
+        if not levels:
+            pairs.append((algo, None))
+            continue
+        for lvl in levels:
+            tok = lvl.strip()
+            try:
+                pairs.append((algo, int(tok)))
+            except ValueError:
+                # 非整数 level 极少见（lzbench alias 中目前没有），跳过并提醒
+                pairs.append((algo, None))
+    return pairs
