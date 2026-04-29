@@ -1,0 +1,19 @@
+# lzbench 二进制与源码（可由 build_lzbench.sh 复现，不入库）
+vendor/
+
+# 测试运行产物
+results/
+*.csv
+state.jsonl
+
+# Python 缓存
+__pycache__/
+*.pyc
+*.pyo
+
+# 编辑器/系统
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo

@@ -1,0 +1,9 @@
+# 测试文件清单：每行一个绝对路径，# 开头为注释。
+# 也可以把目录作为 --files 参数（自动展开为目录下所有普通文件）。
+
+# 例：
+# /data/corpus/glove.6B.300d.txt
+# /data/corpus/silesia/dickens
+# /data/corpus/silesia/mozilla
+# /data/corpus/silesia/webster
+# /data/corpus/silesia/xml
