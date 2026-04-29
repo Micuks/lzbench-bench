@@ -123,31 +123,36 @@ cat results/summary.md
 
 ## 跑测试的常见姿势
 
-### 全量跑（推荐）
+### 全量跑（推荐 / 默认）
 ```bash
 ./bench.py run --files files.txt
 ```
 默认配置：
 - worker 数 = NUMA 节点数（每 NUMA 钉 1 个核）
-- 算法 = 全部支持的（启动时自动 probe）
-- level 采样：少则全测、多则 5 个等距点
+- 算法 = `--preset ALL`，即上游
+  [`doc/lzbench20_sorted.md`](https://github.com/inikep/lzbench/blob/master/doc/lzbench20_sorted.md)
+  那张全压缩器对照表用的 candidate 集合（148 个 (algo, level) 对，含 `zstd_fast` 的负 level、
+  `bsc1/4/5` 子 alias、`lzham 0/1`、`lzo1b,1,3,6,9,99,999` 等手工策划的 level，
+  来自 `lzbench -l` 输出的 `ALL = ...` 行——跟着二进制走永不失同步）。
 - 分块：`0 (不分块), 4 KB, 64 KB`
 - 计时：压缩 12s + 解压 3s
-- per-task 超时：600s
+- per-task 超时：86400s（24 小时）。慢算法 + 大文件可能跑过夜，超时阈值放得很宽。
 
-### 一键复现 lzbench20_sorted.md 的 candidate 集合
+跟上游 `lzbench -eALL` 的差别只在编排：本工具会把 148 pairs × 3 分块 × N 文件并行
+铺到所有 NUMA 上、可断点续测、自动出 summary。
+
+`--algos` 仍可作为后置过滤器（如 `--algos zstd,brotli,kanzi` 只保留这三类）。
+
+### 切换 preset
+
 ```bash
-./bench.py run --files files.txt --preset ALL
+# lzbench 的"高速档"子集（>100 MB/s 的算法，35 对）
+./bench.py run --files files.txt --preset FAST
+
+# 关闭 preset，改用我们朴素的"levels 多则等距 5 点"采样（自由度更高，
+# 但对 lzo1b/lzo1c 这类"看着 [1-999] 实际只有几个有效 level"的算法会浪费许多 probe）
+./bench.py run --files files.txt --preset OFF --algos zstd --level-points 22
 ```
-`--preset ALL` 直接解析 `lzbench -l` 输出里的 `ALL` alias——这是 lzbench 自己跑
-[`doc/lzbench20_sorted.md`](https://github.com/inikep/lzbench/blob/master/doc/lzbench20_sorted.md)
-那张全压缩器对照表用的同一份算法+level 列表（148 个 (algo, level) 对，含 `zstd_fast` 的负 level、`bsc1/4/5` 子 alias、`lzham 0/1` 等）。
-
-跟上游 `-eALL` 的差别只在编排：本工具会把 148 pairs × 3 分块 × N 文件并行铺到所有
-NUMA 上、可断点续测、自动出 summary。`--preset ALL` 时忽略 `--level-points`，
-但 `--algos` 仍可作为后置过滤器（如 `--preset ALL --algos zstd,brotli,kanzi`）。
-
-也可用 `--preset FAST` 跑 lzbench 的"高速档"子集（>100 MB/s 的算法）。
 
 ### 只测几个感兴趣的算法
 ```bash
@@ -316,11 +321,10 @@ bench.py run       --files FILES_OR_DIR_OR_TXT
                    [--workers N]            worker 数，默认 = NUMA 节点数
                    [--blocks 0,4,64]        分块组合（KB；0 = 不分块）
                    [--algos zstd,lz4,...]   仅测这些算法（默认全部）
-                   [--level-points 5]       多 level 算法的采样点数
-                   [--preset ALL|FAST]      使用 lzbench 内置 alias；--preset ALL
-                                            等价于上游 -eALL（即 lzbench20_sorted.md 那张表）
+                   [--preset ALL|FAST|OFF]  默认 ALL，复现 lzbench20_sorted.md 的 candidate 集合
+                   [--level-points 5]       朴素采样点数（仅 --preset OFF 时生效）
                    [--time 12,3]            压缩,解压计时（秒）
-                   [--task-timeout 600]     单 task 上限（秒）
+                   [--task-timeout 86400]   单 task 上限（秒），默认 24h
                    [--retry-failed]         也重跑 failed 状态的 task
                    [--no-probe]             跳过 (algo,level) 自检
                    [--force-probe]          强制重新 probe

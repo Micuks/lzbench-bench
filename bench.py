@@ -39,8 +39,10 @@ import topology
 
 DEFAULT_BLOCKS = [0, 4, 64]   # 0 = 不分块
 DEFAULT_TIME = (12, 3)        # -t 默认：压缩 12s、解压 3s
-DEFAULT_TIMEOUT = 600         # per-task timeout
+DEFAULT_TIMEOUT = 86400       # per-task timeout (24h)；慢算法 + 大文件可能跑过夜
 DEFAULT_LEVEL_POINTS = 5
+DEFAULT_PRESET = "ALL"        # 默认走 lzbench 内置 ALL alias（即 lzbench20_sorted.md
+                              # 那张表的 candidate 集合），传 OFF 切回朴素等距采样
 RUN_TASK = HERE / "run_task.sh"
 BUILD_SH = HERE / "build_lzbench.sh"
 
@@ -449,19 +451,25 @@ def cmd_run(args: argparse.Namespace) -> int:
     blocks = [int(b) for b in args.blocks.split(",")]
     algo_names = [a.strip() for a in args.algos.split(",")] if args.algos else None
 
-    if args.preset:
+    preset = args.preset.strip() if args.preset else ""
+    if preset and preset.upper() not in {"OFF", "NONE", "FALSE", "0"}:
         # 直接复用 lzbench 内置 alias（如 ALL / FAST）。优点：跟着 lzbench 二进制走，
-        # 算法/level 集合永远同步。--algos 仍可作为后置过滤器。
+        # 算法/level 集合永远同步——不会出现"我们朴素等距采样 [1, 26, 50, 74, 99]
+        # 但 lzo1b 实际只有 1/3/6/9/99/999 这几个有效 level 而到处 probe 失败"的浪费。
+        # --algos 仍可作为后置过滤器。
         l_out = subprocess.run(
             [str(lzbench), "-l"], capture_output=True, text=True, check=True
         ).stdout
-        matrix = algorithms.parse_lzbench_alias(l_out, args.preset)
+        matrix = algorithms.parse_lzbench_alias(l_out, preset)
         if algo_names:
             allow = set(algo_names)
             matrix = [(a, l) for (a, l) in matrix if a in allow]
-        print(f"preset={args.preset}: {len(matrix)} (algo, level) 对（来自 lzbench -l）", flush=True)
+        print(f"preset={preset}: {len(matrix)} (algo, level) 对（来自 lzbench -l）", flush=True)
     else:
+        # 朴素等距采样路径（--preset off）。多用于刻意做密 level sweep 画曲线，
+        # 例如 `--preset off --algos zstd --level-points 22`。
         matrix = algorithms.expand_matrix(algo_names, n_points=args.level_points)
+        print(f"smart-sample: {len(matrix)} (algo, level) 对（每算法 ≤{args.level_points} 点）", flush=True)
 
     # 自检过滤未编译进的算法
     detected_path = out_dir / "algorithms.detected.json"
@@ -657,14 +665,16 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--blocks", default=",".join(str(b) for b in DEFAULT_BLOCKS))
     pr.add_argument("--algos", default=None)
     pr.add_argument("--level-points", type=int, default=DEFAULT_LEVEL_POINTS,
-                    help="多 level 算法的采样点数（与 --preset 互斥）")
-    pr.add_argument("--preset", default=None,
-                    help="使用 lzbench 内置 alias（ALL / FAST），等价于上游 -e<ALIAS>。"
-                         " ALL = lzbench20_sorted.md 那张表的 candidates 集合。"
-                         " 指定后忽略 --level-points，--algos 仍作过滤器。")
+                    help="多 level 算法的朴素采样点数（仅在 --preset off 时生效）")
+    pr.add_argument("--preset", default=DEFAULT_PRESET,
+                    help=f"lzbench 内置 alias，默认 {DEFAULT_PRESET}（即 lzbench20_sorted.md "
+                         "的 candidate 集合，内含 lzo1b,1,3,6,9,99,999 等手工策划的 level）。"
+                         "可选 ALL / FAST，或 OFF 切回朴素等距采样。--algos 仍作过滤器。")
     pr.add_argument("--time", type=_parse_time,
                     default=DEFAULT_TIME, help="格式 ctime,dtime（秒）")
-    pr.add_argument("--task-timeout", type=int, default=DEFAULT_TIMEOUT)
+    pr.add_argument("--task-timeout", type=int, default=DEFAULT_TIMEOUT,
+                    help=f"单 task 超时秒数，默认 {DEFAULT_TIMEOUT}（24h）。"
+                         "慢算法 + 大文件可能跑过夜，所以默认放得很宽。")
     pr.add_argument("--retry-failed", action="store_true")
     pr.add_argument("--no-probe", action="store_true",
                     help="跳过 (algo,level) 自检")
